@@ -42,7 +42,7 @@ def save_json_file(filename, data):
 
 
 def is_correct_local_time():
-    return TRUE
+    return True
     #now = datetime.now(ZoneInfo(TIMEZONE))
     # Check if it's the target day and the current hour is the target hour
     # We allow a window of the first 10 minutes of the hour to account for
