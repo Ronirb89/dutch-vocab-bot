@@ -37,8 +37,9 @@ def save_json_file(filename, data):
 
 
 def is_correct_local_time():
-    now = datetime.now(ZoneInfo(TIMEZONE))
-    return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR
+    return True
+   # now = datetime.now(ZoneInfo(TIMEZONE))
+   # return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR
 
 
 def fetch_frequency_words():
