@@ -45,7 +45,7 @@ def save_json_file(filename, data):
 
 
 def is_correct_local_time():
-    retun True
+    return True
    # now = datetime.now(ZoneInfo(TIMEZONE))
     #return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < 10
 
