@@ -22,11 +22,14 @@ MAX_WORDS = 10
 
 # Public Dutch frequency list
 FREQUENCY_LIST_URL = "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/nl/nl_50k.txt"
-# Adjusted range to pick words more likely to be common lemmas
-# Start at 300 to skip very common articles/pronouns/prepositions
-# End at 2500 to avoid too many obscure or highly inflected words
 WORD_SELECTION_START_INDEX = 300
 WORD_SELECTION_END_INDEX = 2500
+
+# Headers to make the request appear more like a browser
+REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36',
+    'Accept': 'application/json' # Explicitly request JSON
+}
 
 
 def load_json_file(filename, default):
@@ -42,12 +45,9 @@ def save_json_file(filename, data):
 
 
 def is_correct_local_time():
-    return True
-    #now = datetime.now(ZoneInfo(TIMEZONE))
-    # Check if it's the target day and the current hour is the target hour
-    # We allow a window of the first 10 minutes of the hour to account for
-    # minor cron schedule variations, ensuring it sends only once.
-   # return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < 10
+    retun True
+   # now = datetime.now(ZoneInfo(TIMEZONE))
+    #return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < 10
 
 
 def fetch_frequency_words():
@@ -62,20 +62,17 @@ def fetch_frequency_words():
             continue
         word = parts[0].strip().lower()
 
-        # Basic filtering to get clean words
         if not re.match(r"^[a-záéíóúàèìòùâêîôûäëïöüç' -]+$", word):
             continue
-        if len(word) < 3 or len(word) > 20: # Exclude very short and very long words
+        if len(word) < 3 or len(word) > 20:
             continue
-        if word.isdigit(): # Exclude numbers
+        if word.isdigit():
             continue
-        # Heuristic to filter out common articles/prepositions that are too simple
         if word in ["de", "het", "een", "in", "op", "aan", "voor", "naar", "met", "uit", "om", "te", "bij"]:
             continue
 
         words.append(word)
 
-    # Deduplicate while preserving order
     seen = set()
     unique_words = []
     for w in words:
@@ -90,43 +87,36 @@ def fetch_frequency_words():
 def pick_candidate_words(all_words, sent_words_history, count):
     sent_set = set(sent_words_history)
 
-    # Apply the refined range from the frequency list
     filtered_for_level = all_words[WORD_SELECTION_START_INDEX:WORD_SELECTION_END_INDEX]
 
-    # Filter out words that were already sent
     unsent_candidates = [w for w in filtered_for_level if w not in sent_set]
 
-    # If we run out of unsent words in the current selection range,
-    # reset the history for this range to start over.
     if len(unsent_candidates) < count:
         print("Ran out of unique words in the selected range. Resetting sent history.")
-        # Only clear words that are within the current selection range
-        # This prevents clearing history for words outside this range if we change WORD_SELECTION_START_INDEX/END_INDEX
-        sent_words_history.clear() # Clear all for simplicity
-        unsent_candidates = filtered_for_level[:] # Re-populate from the filtered range
+        sent_words_history.clear()
+        unsent_candidates = filtered_for_level[:]
 
-    # Randomly select words from the unsent candidates
     selected = random.sample(unsent_candidates, min(count, len(unsent_candidates)))
     return selected
 
 
 def get_wiktionary_info(word):
-    """
-    Uses en.wiktionary REST API to fetch page definition summary.
-    This is free but quality can vary.
-    """
     url = f"https://en.wiktionary.org/api/rest_v1/page/definition/{word}"
     try:
-        r = requests.get(url, timeout=20)
-        if r.status_code != 200:
-            print(f"Wiktionary API for '{word}' returned status {r.status_code}")
+        # Use the defined headers
+        r = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
+        
+        if r.status_code == 403:
+            print(f"Wiktionary API for '{word}' returned status 403 (Forbidden). Check IP/User-Agent blocking.")
             return None
+        if r.status_code != 200:
+            print(f"Wiktionary API for '{word}' returned status {r.status_code} (not 200).")
+            return None
+        
         data = r.json()
 
         if "nl" not in data:
-            print(f"Wiktionary API for '{word}' did not contain 'nl' (Dutch) section.")
-            # If "nl" is not found, try to find a meaning in other languages (e.g., English)
-            # This is a fallback to at least provide *some* meaning if Dutch is missing.
+            print(f"Wiktionary API for '{word}' did not contain 'nl' (Dutch) section. Trying English fallback.")
             if "en" in data and data["en"]:
                 for entry in data["en"]:
                     definitions = entry.get("definitions", [])
@@ -137,30 +127,29 @@ def get_wiktionary_info(word):
                             "meaning": definitions[0].get("definition", "meaning not found (English fallback)"),
                             "example": definitions[0].get("examples", [None])[0]
                         }
-            return None # No Dutch definition found, and no English fallback
+            print(f"No Dutch or English definition found for '{word}'.")
+            return None
         
         entries = data["nl"]
         meanings = []
         pos = None
         example = None
 
-        # Iterate through all Dutch entries to find the best info
         for entry in entries:
-            # Prefer common parts of speech for our purposes
             current_pos = entry.get("partOfSpeech")
             if current_pos in ["noun", "verb", "adjective"]:
                 pos = current_pos
-            elif not pos and current_pos: # Take first POS if preferred not found
+            elif not pos and current_pos:
                 pos = current_pos
 
             definitions = entry.get("definitions", [])
             for d in definitions:
                 definition_text = d.get("definition")
-                if definition_text and not definition_text.startswith("Alternative form of"): # Exclude alternative forms
+                if definition_text and not definition_text.startswith("Alternative form of"):
                     meanings.append(definition_text)
 
                 examples = d.get("examples", [])
-                if not example and examples: # Take first example
+                if not example and examples:
                     example = examples[0]
 
         meaning = meanings[0] if meanings else None
@@ -179,16 +168,15 @@ def get_wiktionary_info(word):
         return None
     except Exception as e:
         print(f"Error parsing Wiktionary API response for '{word}': {e}")
-        # print(f"Raw data for '{word}': {r.text if r else 'N/A'}") # Uncomment for deeper debugging
         return None
 
 
 def clean_text(text):
     if not text:
         return None
-    text = re.sub(r"<[^>]+>", "", text) # Remove HTML tags
-    text = re.sub(r"\[\[[^\]]+\]\]", "", text) # Remove MediaWiki internal links
-    text = re.sub(r"\(.*?\)|\{.*?\}", "", text) # Remove text in parentheses or curly braces
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\[\[[^\]]+\]\]", "", text)
+    text = re.sub(r"\(.*?\)|\{.*?\}", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -208,7 +196,6 @@ def build_entry(word):
             "example": example or f"Voorbeeld: Ik gebruik het woord '{word}' in een zin."
         }
 
-    # Fallback if Wiktionary API fails or returns nothing useful
     return {
         "word": word,
         "meaning": "meaning not found",
@@ -267,10 +254,6 @@ def main():
     if not BOT_TOKEN or not CHAT_ID:
         raise ValueError("Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID environment variables.")
 
-    # Temporarily override for testing: uncomment the line below if you need to force a send
-    # if os.getenv("GITHUB_ACTIONS") == "true" and os.getenv("RUN_TEST_OVERRIDE") == "true":
-    #     print("Test override enabled: skipping time check.")
-    # else:
     if not is_correct_local_time():
         print("Not the correct Amsterdam local time (Mon/Wed at 12:00). Exiting.")
         return
@@ -297,11 +280,9 @@ def main():
     send_telegram_message(BOT_TOKEN, CHAT_ID, message)
     print("Telegram message sent successfully.")
 
-    # Update sent words history
     sent_words.extend(selected_words)
     save_json_file(SENT_FILE, sent_words)
     print(f"Updated sent_words.json with {len(selected_words)} new words. Total sent: {len(sent_words)}")
-
 
     if os.getenv("GITHUB_ACTIONS") == "true":
         git_commit_and_push()
