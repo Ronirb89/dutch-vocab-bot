@@ -16,7 +16,7 @@ SENT_FILE = "sent_words.json"
 TIMEZONE = "Europe/Amsterdam"
 TARGET_DAYS = {0, 2}  # Monday, Wednesday (0=Monday, 6=Sunday)
 TARGET_HOUR = 12
-TARGET_MINUTE_WINDOW = 10 # Allow script to run in first 10 minutes of the hour
+TARGET_MINUTE_WINDOW = 30 # Allow script to run within the first 30 minutes of the hour
 
 MIN_WORDS = 5
 MAX_WORDS = 10
@@ -39,12 +39,13 @@ REQUEST_HEADERS = {
 def load_json_file(filename, default):
     if not os.path.exists(filename):
         return default
-    try: # <--- This 'try' must be followed by an 'except'
+    try:
         with open(filename, "r", encoding="utf-8") as f:
             return json.load(f)
-    except json.JSONDecodeError: # <--- This 'except' block is crucial and must be at the same indent level as 'try'
+    except json.JSONDecodeError:
         print(f"Warning: {filename} is corrupted or empty. Starting with default.")
         return default
+
 
 def save_json_file(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
@@ -53,6 +54,9 @@ def save_json_file(filename, data):
 
 def is_correct_local_time():
     now = datetime.now(ZoneInfo(TIMEZONE))
+    # Check if it's the target day and the current hour is the target hour
+    # We allow a window of TARGET_MINUTE_WINDOW minutes of the hour to account for
+    # minor cron schedule variations, ensuring it sends only once.
     return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < TARGET_MINUTE_WINDOW
 
 
@@ -104,6 +108,7 @@ def get_wiktionary_info(word):
     """
     url = f"https://en.wiktionary.org/api/rest_v1/page/definition/{word}"
     try:
+        # Use the defined headers
         r = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
         
         if r.status_code == 403:
@@ -171,7 +176,7 @@ def get_wiktionary_info(word):
         # print(f"No Dutch or English definition found for '{word}'.")
         return None # No definition found in either Dutch or English
 
-
+# --- Start of clean_text function --- This is line 175 in the provided code
 def clean_text(text):
     if not text:
         return None
@@ -224,13 +229,17 @@ def pick_quality_words(all_words, sent_words_history, desired_count):
     # Filter out words that were already sent
     unsent_potential_candidates = [w for w in filtered_for_level if w not in sent_set]
 
-    # If we don't have enough truly unsent words in the current range, reset the history.
+    # If we don't have enough truly unsent words in the current selection range to fill
+    # a reasonably sized pool (e.g., 5 times the desired_count), reset the history.
     # This reset happens BEFORE extensive API calls, for efficiency.
-    # We aim for a pool much larger than desired_count to ensure quality filtering yields enough words.
-    if len(unsent_potential_candidates) < desired_count * 5: 
+    if len(unsent_potential_candidates) < desired_count * 5 and len(sent_words_history) > 0: 
         print(f"Not enough truly unsent words ({len(unsent_potential_candidates)}) in current range. Resetting sent history.")
-        sent_words_history.clear() # Clear all history for the selected range to start fresh
-        unsent_potential_candidates = filtered_for_level[:] # Re-populate from the filtered range
+        # Only clear words that are within the current selection range if we want to be precise.
+        # For simplicity and to ensure fresh words, clearing all history.
+        sent_words_history.clear() 
+        # After clearing, re-populate unsent_potential_candidates
+        unsent_potential_candidates = [w for w in filtered_for_level if w not in sent_set]
+
 
     # Shuffle the potential candidates to ensure randomness before fetching detailed info
     random.shuffle(unsent_potential_candidates)
@@ -240,10 +249,14 @@ def pick_quality_words(all_words, sent_words_history, desired_count):
     POOL_MAX_ATTEMPTS = max(desired_count * 10, 100) # Try up to 100 words or 10x desired_count
     attempts = 0
 
+    print(f"Attempting to find {desired_count} quality words from {len(unsent_potential_candidates)} candidates.")
+
     for word in unsent_potential_candidates:
         if len(quality_entries) >= desired_count and attempts >= desired_count * 2: # Stop early if we have enough and tried a decent number
+             # print(f"  Enough quality words found ({len(quality_entries)}). Stopping search.")
              break
-        if attempts >= POOL_MAX_ATTEMPTS: # Stop if we've tried too many words
+        if attempts >= POOL_MAX_ATTEMPTS: # Stop if we've tried too many words without success
+            print(f"  Reached max attempts ({POOL_MAX_ATTEMPTS}) without enough quality words.")
             break
 
         attempts += 1
@@ -255,8 +268,8 @@ def pick_quality_words(all_words, sent_words_history, desired_count):
                 # Only accept Noun, Verb, Adjective, Adverb for core vocabulary
                 if entry_data["pos"] in ["noun", "verb", "adjective", "adverb"]:
                     quality_entries.append(entry_data)
-                else:
-                    print(f"  Skipping '{word}' due to undesired POS: '{entry_data['pos']}'")
+                # else:
+                    # print(f"  Skipping '{word}' due to undesired POS: '{entry_data['pos']}'")
             # else:
                 # print(f"  Skipping '{word}' due to no meaning found.")
         # else:
@@ -265,7 +278,7 @@ def pick_quality_words(all_words, sent_words_history, desired_count):
 
     # Final selection from the quality entries
     if len(quality_entries) < desired_count:
-        print(f"WARNING: Could only find {len(quality_entries)} high-quality words. Picking all available.")
+        print(f"WARNING: Could only find {len(quality_entries)} high-quality words after filtering. Picking all available.")
         selected_entries = quality_entries
     else:
         selected_entries = random.sample(quality_entries, desired_count)
