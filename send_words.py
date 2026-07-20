@@ -176,7 +176,7 @@ def get_wiktionary_info(word):
         # print(f"No Dutch or English definition found for '{word}'.")
         return None # No definition found in either Dutch or English
 
-# --- Start of clean_text function --- This is line 175 in the provided code
+
 def clean_text(text):
     if not text:
         return None
