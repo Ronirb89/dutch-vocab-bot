@@ -39,13 +39,12 @@ REQUEST_HEADERS = {
 def load_json_file(filename, default):
     if not os.path.exists(filename):
         return default
-    try:
+    try: # <--- This 'try' must be followed by an 'except'
         with open(filename, "r", encoding="utf-8") as f:
             return json.load(f)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError: # <--- This 'except' block is crucial and must be at the same indent level as 'try'
         print(f"Warning: {filename} is corrupted or empty. Starting with default.")
         return default
-
 
 def save_json_file(filename, data):
     with open(filename, "w", encoding="utf-8") as f:
