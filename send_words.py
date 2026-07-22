@@ -53,11 +53,13 @@ def save_json_file(filename, data):
 
 
 def is_correct_local_time():
-    now = datetime.now(ZoneInfo(TIMEZONE))
+    #now = datetime.now(ZoneInfo(TIMEZONE))
     # Check if it's the target day and the current hour is the target hour
     # We allow a window of TARGET_MINUTE_WINDOW minutes of the hour to account for
     # minor cron schedule variations, ensuring it sends only once.
-    return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < TARGET_MINUTE_WINDOW
+   # return now.weekday() in TARGET_DAYS and now.hour == TARGET_HOUR and now.minute < TARGET_MINUTE_WINDOW
+    return True
+    
 
 
 def fetch_frequency_words():
